@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Realtime GPS Tracker</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <style>
+    body { margin: 0; font-family: Arial; }
+    #map { height: 100vh; }
+    .panel {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: white;
+      padding: 10px 15px;
+      border-radius: 8px;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.3);
+      z-index: 1000;
+    }
+  </style>
+</head>
+<body>
+
+<div class="panel">
+  🚀 Realtime GPS Tracker (My Phone)
+</div>
+
+<div id="map"></div>
+
+<script>
+
+const BASE_URL = "https://script.google.com/macros/s/AKfycbwMyZVVEWN_l1yKPQ62hhZbFlnHsL75M1qCGVe7xUl2_zUXhaqj436NmpSo8PAhMrkX/exec";
+const MY_DEVICE_ID = "my-phone-01";
+
+const map = L.map('map').setView([-7.2575, 112.7521], 15);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
+.addTo(map);
+
+const markers = {};
+const polylines = {};
+
+function getColorFromDevice(device_id) {
+  let hash = 0;
+  for (let i = 0; i < device_id.length; i++) {
+    hash = device_id.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return `hsl(${Math.abs(hash) % 360}, 70%, 50%)`;
+}
+
+/* ================= LOAD DATA ================= */
+
+function loadAllDevices() {
+
+  fetch(BASE_URL + "?path=telemetry/gps/history&device_id=ALL&limit=200")
+  .then(res => res.json())
+  .then(data => {
+
+    if(!data.ok) return;
+
+    const items = data.data.items;
+    const grouped = {};
+
+    items.forEach(item => {
+
+      if(!grouped[item.device_id]){
+        grouped[item.device_id] = [];
+      }
+
+      grouped[item.device_id].push([Number(item.lat), Number(item.lng)]);
+    });
+
+    Object.keys(grouped).forEach(device => {
+
+      const coords = grouped[device];
+      const latest = coords[coords.length - 1];
+      const color = getColorFromDevice(device);
+
+      if(markers[device]){
+        markers[device].setLatLng(latest);
+      } else {
+        markers[device] = L.circleMarker(latest,{
+          radius: device === MY_DEVICE_ID ? 12 : 8,
+          color: device === MY_DEVICE_ID ? "#000" : color,
+          fillColor: color,
+          fillOpacity: 0.9
+        }).addTo(map)
+          .bindPopup(`<b>${device}</b>`);
+      }
+
+      if(polylines[device]){
+        polylines[device].setLatLngs(coords);
+      } else {
+        polylines[device] = L.polyline(coords,{
+          color: color,
+          weight: 3
+        }).addTo(map);
+      }
+
+      if(device === MY_DEVICE_ID){
+        map.panTo(latest);
+      }
+
+    });
+
+  });
+}
+
+/* ================= KIRIM GPS ASLI ================= */
+
+function sendMyLocation() {
+
+  if (!navigator.geolocation) {
+    alert("Browser tidak mendukung GPS");
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(function(position) {
+
+    const body = {
+      device_id: MY_DEVICE_ID,
+      ts: new Date().toISOString(),
+      lat: position.coords.latitude,
+      lng: position.coords.longitude,
+      accuracy: position.coords.accuracy
+    };
+
+    fetch(BASE_URL + "?path=telemetry/gps", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    })
+    .then(res => res.json())
+    .then(data => console.log("GPS sent:", data));
+
+  });
+}
+
+/* ================= AUTO RUN ================= */
+
+loadAllDevices();
+setInterval(loadAllDevices, 5000);
+setInterval(sendMyLocation, 8000);
+
+</script>
+
+</body>
+</html>
